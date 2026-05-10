@@ -1,0 +1,14 @@
+{
+  "wp_base_url": "https://weddingmaps.com",
+  "wm_secret": "generate-with-python3-c-import-secrets-print-secrets-token-hex-32",
+  "anthropic_api_key": "sk-ant-...",
+
+  "google_geocoding_api_key": "",
+  "google_places_api_key": "",
+
+  "per_page": 20,
+  "delay_between_venues": 1.0,
+  "delay_between_pages": 2.0,
+  "max_retries": 3,
+  "retry_delay": 5.0
+}

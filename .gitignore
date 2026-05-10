@@ -1,0 +1,17 @@
+# Secrets — never commit
+config.json
+
+# Raw GSC exports (large, replaced by gsc-data/Pages.csv)
+https___*/
+
+# Other data files not needed in the repo
+*.pdf
+*.csv
+!gsc-data/Pages.csv
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
