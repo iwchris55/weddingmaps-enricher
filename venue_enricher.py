@@ -80,9 +80,9 @@ DEFAULT_CONFIG = {
                                       # Can be the same key if both APIs are enabled on it
 
     # Tuning
-    "per_page": 20,            # venues fetched per REST page
-    "delay_between_venues": 1.0,   # seconds between API calls (be polite)
-    "delay_between_pages": 2.0,    # seconds between WP REST pages
+    "per_page": 50,                # venues fetched per REST page (WP max)
+    "delay_between_venues": 0.3,   # seconds between venue API calls
+    "delay_between_pages": 1.0,    # seconds between WP REST pages
     "max_retries": 3,
     "retry_delay": 5.0,
 }
@@ -824,7 +824,12 @@ def run_pipeline(args, config: dict):
         # ── Google Places enrichment (fills phone, website, rating when missing)
         places_key = config.get("google_places_api_key", "")
         place_data = None   # populated below if Places API is configured + match found
-        if places_key:
+        has_phone   = bool(meta.get("qodef_listing_single_phone"))
+        has_website = bool(meta.get("qodef_listing_single_site_url"))
+        has_rating  = bool(meta.get("wm_rating"))
+        # Skip Places API if we already have the key contact/rating data — saves ~$0.017/venue
+        need_places = places_key and not (has_phone and has_website and has_rating)
+        if need_places:
             address = meta.get("qodef_listing_single_full_address", "")
             place_data = lookup_google_place(title, address, places_key)
             if place_data:  # re-assign so outer scope picks it up
