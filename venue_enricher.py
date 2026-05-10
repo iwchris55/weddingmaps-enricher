@@ -594,7 +594,7 @@ def enrich_venue_with_claude(
     try:
         response = client.messages.create(
             model="claude-haiku-4-5",
-            max_tokens=2000,
+            max_tokens=1200,
             system=[
                 {
                     "type": "text",
