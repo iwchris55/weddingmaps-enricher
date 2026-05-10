@@ -21,6 +21,8 @@ jobs:
   enrich:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
+    permissions:
+      contents: write   # needed to commit enrichment_progress.json back
 
     steps:
       - name: Checkout repo
