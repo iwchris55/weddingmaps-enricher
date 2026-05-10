@@ -57,7 +57,7 @@ jobs:
           if [ -n "${{ github.event.inputs.limit }}" ]; then
             ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
           elif [ "${{ github.event_name }}" = "schedule" ]; then
-            ARGS="$ARGS --limit 100"
+            ARGS="$ARGS --limit 1000"
           fi
           python3 venue_enricher.py $ARGS
 
