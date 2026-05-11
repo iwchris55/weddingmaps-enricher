@@ -175,6 +175,28 @@ class WPClient:
             return False
         return True
 
+    def sideload_featured_image(self, post_id: int, image_url: str, dry_run: bool = False) -> bool:
+        """Download a remote image and set it as the venue's featured image."""
+        if dry_run:
+            print(f"    [DRY RUN] Would sideload image: {image_url[:80]}")
+            return True
+        url = f"{self.base_url}/wp-json/wm/v1/venue/{post_id}/image"
+        resp = self.session.post(
+            url,
+            json={"image_url": image_url},
+            timeout=60,  # sideloading can be slow
+            params={"_wm_token": self.secret},
+        )
+        if not resp.ok:
+            print(f"    ✗ Image upload failed ({resp.status_code}): {resp.text[:200]}")
+            return False
+        data = resp.json()
+        if data.get("status") == "skipped":
+            print(f"    ↷ Image: {data.get('reason', 'skipped')}")
+        else:
+            print(f"    ✓ Image uploaded (attachment {data.get('attachment_id')})")
+        return True
+
     def set_yoast_noindex(self, post_id: int, noindex: bool = True, dry_run: bool = False) -> bool:
         """Set or clear Yoast noindex via post meta."""
         meta = {"_yoast_wpseo_meta-robots-noindex": "1" if noindex else "0"}
@@ -580,6 +602,52 @@ def build_user_message(venue: dict, extra_meta: dict) -> str:
     return "\n".join(lines)
 
 
+def fetch_og_image(website_url: str) -> Optional[str]:
+    """
+    Fetch the og:image URL from a venue's website.
+    Returns the absolute image URL or None if not found.
+    Falls back to twitter:image if og:image is absent.
+    """
+    if not website_url:
+        return None
+    try:
+        resp = requests.get(
+            website_url, timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; WeddingMapsBot/1.0)"},
+            allow_redirects=True,
+        )
+        if not resp.ok:
+            return None
+        html = resp.text[:50_000]  # only parse the <head>
+        import re
+        for prop in ("og:image", "twitter:image"):
+            # property="og:image" content="URL"
+            m = re.search(
+                r'<meta[^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\'][^>]+content=["\']([^"\']+)["\']',
+                html, re.IGNORECASE,
+            )
+            if not m:
+                # content="URL" property="og:image"
+                m = re.search(
+                    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\']',
+                    html, re.IGNORECASE,
+                )
+            if m:
+                img = m.group(1).strip()
+                # Make relative URLs absolute
+                if img.startswith("//"):
+                    img = "https:" + img
+                elif img.startswith("/"):
+                    from urllib.parse import urlparse
+                    base = urlparse(website_url)
+                    img = f"{base.scheme}://{base.netloc}{img}"
+                if img.startswith("http"):
+                    return img
+    except Exception:
+        pass
+    return None
+
+
 def enrich_venue_with_claude(
     client: Anthropic,
     venue: dict,
@@ -948,6 +1016,19 @@ def run_pipeline(args, config: dict):
             new_meta["qodef_listing_single_phone"] = meta["qodef_listing_single_phone"]
         if meta.get("qodef_listing_single_site_url") and not orig_meta.get("qodef_listing_single_site_url"):
             new_meta["qodef_listing_single_site_url"] = meta["qodef_listing_single_site_url"]
+
+        # ── Fetch og:image from venue website (if no featured image yet)
+        if not venue.get("featured_media"):
+            website_url = (
+                meta.get("qodef_listing_single_site_url") or
+                (place_data.get("website") if place_data else None)
+            )
+            og_image = fetch_og_image(website_url) if website_url else None
+            if og_image:
+                print(f"    Image: {og_image[:80]}")
+                wp.sideload_featured_image(post_id, og_image, dry_run=args.dry_run)
+            else:
+                print(f"    Image: none found")
 
         # ── Write back
         if wp.update_venue_meta(post_id, new_meta, dry_run=args.dry_run):
