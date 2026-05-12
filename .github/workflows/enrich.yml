@@ -9,9 +9,9 @@ on:
         required: false
         default: ""
       limit:
-        description: "Max venues to enrich (leave blank for no limit)"
+        description: "Max venues to enrich (default: 1000)"
         required: false
-        default: ""
+        default: "1000"
 
   # Automatic daily run at 9 AM PT (16:00 UTC) — capped at 100 venues/day
   schedule:
@@ -53,12 +53,9 @@ jobs:
           if [ -n "${{ github.event.inputs.tier }}" ]; then
             ARGS="$ARGS --tier ${{ github.event.inputs.tier }}"
           fi
-          # Manual runs use provided limit; scheduled runs default to 100
-          if [ -n "${{ github.event.inputs.limit }}" ]; then
-            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
-          elif [ "${{ github.event_name }}" = "schedule" ]; then
-            ARGS="$ARGS --limit 1000"
-          fi
+          # Both manual and scheduled runs default to 1000 venues
+          LIMIT="${{ github.event.inputs.limit }}"
+          ARGS="$ARGS --limit ${LIMIT:-1000}"
           python3 venue_enricher.py $ARGS
 
       - name: Commit progress
