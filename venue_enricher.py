@@ -896,7 +896,8 @@ def run_pipeline(args, config: dict):
         has_website = bool(meta.get("qodef_listing_single_site_url"))
         has_rating  = bool(meta.get("wm_rating"))
         # Skip Places API if we already have the key contact/rating data — saves ~$0.017/venue
-        need_places = places_key and not (has_phone and has_website and has_rating)
+        # Also skip if --no-places flag is set (e.g. monthly credit exhausted)
+        need_places = places_key and not (has_phone and has_website and has_rating) and not args.no_places
         if need_places:
             address = meta.get("qodef_listing_single_full_address", "")
             place_data = lookup_google_place(title, address, places_key)
@@ -1127,6 +1128,10 @@ def main():
     parser.add_argument(
         "--force", action="store_true",
         help="Re-enrich venues that already have wm_enriched_at set"
+    )
+    parser.add_argument(
+        "--no-places", action="store_true", dest="no_places",
+        help="Skip Google Places API calls (use when monthly credit is exhausted)"
     )
     args = parser.parse_args()
 
