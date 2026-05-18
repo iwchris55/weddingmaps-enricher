@@ -157,8 +157,13 @@ class WPClient:
         resp.raise_for_status()
         return resp.json()
 
-    def update_venue_meta(self, post_id: int, meta: dict, dry_run: bool = False) -> bool:
-        """Write wm_* meta fields via the lightweight wm/v1/venue endpoint."""
+    def update_venue_meta(self, post_id: int, meta: dict, dry_run: bool = False,
+                          retries: int = 3, retry_delay: float = 10.0) -> bool:
+        """Write wm_* meta fields via the lightweight wm/v1/venue endpoint.
+
+        Retries on timeout or connection errors so a slow WPEngine response
+        doesn't crash the entire pipeline run.
+        """
         if dry_run:
             print(f"    [DRY RUN] Would write meta to post {post_id}:")
             for k, v in meta.items():
@@ -166,14 +171,25 @@ class WPClient:
                 print(f"      {k}: {preview}")
             return True
         url = f"{self.base_url}/wp-json/wm/v1/venue/{post_id}"
-        resp = self.session.post(
-            url, json=meta, timeout=30,
-            params={"_wm_token": self.secret},
-        )
-        if not resp.ok:
-            print(f"    ✗ REST write failed ({resp.status_code}): {resp.text[:200]}")
-            return False
-        return True
+        for attempt in range(1, retries + 1):
+            try:
+                resp = self.session.post(
+                    url, json=meta, timeout=60,
+                    params={"_wm_token": self.secret},
+                )
+                if not resp.ok:
+                    print(f"    ✗ REST write failed ({resp.status_code}): {resp.text[:200]}")
+                    return False
+                return True
+            except (requests.exceptions.ReadTimeout,
+                    requests.exceptions.ConnectionError) as e:
+                if attempt < retries:
+                    print(f"    ⚠ WP write timeout (attempt {attempt}/{retries}), retrying in {retry_delay}s…")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"    ✗ WP write failed after {retries} attempts: {e}")
+                    return False
+        return False
 
     def sideload_featured_image(self, post_id: int, image_url: str, dry_run: bool = False) -> bool:
         """Download a remote image and set it as the venue's featured image."""
@@ -1058,9 +1074,13 @@ def run_pipeline(args, config: dict):
 
             try:
                 venues = wp.get_venues_page(page, config["per_page"])
-            except requests.HTTPError as e:
-                print(f"REST API error on page {page}: {e}")
-                break
+            except (requests.HTTPError,
+                    requests.exceptions.ReadTimeout,
+                    requests.exceptions.ConnectionError) as e:
+                print(f"REST API error on page {page}: {e} — skipping page")
+                page += 1
+                time.sleep(config["delay_between_pages"])
+                continue
 
             if not venues:
                 print("No more venues.")
@@ -1071,7 +1091,12 @@ def run_pipeline(args, config: dict):
             for v in venues:
                 if args.limit and enriched_count >= args.limit:
                     break
-                did_work = process_venue(v)
+                try:
+                    did_work = process_venue(v)
+                except Exception as e:
+                    print(f"    ✗ Unexpected error on post {v.get('id')}: {e}")
+                    error_count += 1
+                    did_work = False
                 if did_work:
                     worked += 1
                     time.sleep(config["delay_between_venues"])
