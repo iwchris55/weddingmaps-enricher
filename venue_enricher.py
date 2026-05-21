@@ -618,14 +618,40 @@ def build_user_message(venue: dict, extra_meta: dict) -> str:
     return "\n".join(lines)
 
 
+def _root_domain(url: str) -> str:
+    """Return the root domain (last two parts) of a URL, e.g. 'example.com'."""
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc.lower().lstrip("www.")
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
 def fetch_og_image(website_url: str) -> Optional[str]:
     """
     Fetch the og:image URL from a venue's website.
-    Returns the absolute image URL or None if not found.
-    Falls back to twitter:image if og:image is absent.
+    Returns the absolute image URL or None if not found / fails domain check.
+
+    Safety checks:
+    - The final page URL after redirects must share the same root domain as
+      website_url. If the site redirects to a different domain (expired domain
+      squatted by a spam site), we reject the image entirely.
+    - The image URL must also be on the same root domain (or a common CDN).
     """
     if not website_url:
         return None
+
+    # Known CDN / image-host domains that are acceptable regardless of venue domain
+    ALLOWED_CDN = {
+        "cloudinary.com", "imgix.net", "squarespace.com", "squarespacecdnimages.com",
+        "wixstatic.com", "amazonaws.com", "googleusercontent.com",
+        "cdninstagram.com", "fbcdn.net",
+    }
+
+    import re
+    from urllib.parse import urlparse
+
+    original_domain = _root_domain(website_url)
+
     try:
         resp = requests.get(
             website_url, timeout=10,
@@ -634,16 +660,20 @@ def fetch_og_image(website_url: str) -> Optional[str]:
         )
         if not resp.ok:
             return None
+
+        # Domain check: if the site redirected to a completely different domain
+        # (e.g. expired domain → spam casino), reject everything.
+        final_domain = _root_domain(resp.url)
+        if final_domain != original_domain:
+            return None
+
         html = resp.text[:50_000]  # only parse the <head>
-        import re
         for prop in ("og:image", "twitter:image"):
-            # property="og:image" content="URL"
             m = re.search(
                 r'<meta[^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\'][^>]+content=["\']([^"\']+)["\']',
                 html, re.IGNORECASE,
             )
             if not m:
-                # content="URL" property="og:image"
                 m = re.search(
                     r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']' + re.escape(prop) + r'["\']',
                     html, re.IGNORECASE,
@@ -654,10 +684,13 @@ def fetch_og_image(website_url: str) -> Optional[str]:
                 if img.startswith("//"):
                     img = "https:" + img
                 elif img.startswith("/"):
-                    from urllib.parse import urlparse
                     base = urlparse(website_url)
                     img = f"{base.scheme}://{base.netloc}{img}"
-                if img.startswith("http"):
+                if not img.startswith("http"):
+                    continue
+                # Image domain must match venue domain or be a known CDN
+                img_domain = _root_domain(img)
+                if img_domain == original_domain or img_domain in ALLOWED_CDN:
                     return img
     except Exception:
         pass
@@ -1035,7 +1068,7 @@ def run_pipeline(args, config: dict):
             new_meta["qodef_listing_single_site_url"] = meta["qodef_listing_single_site_url"]
 
         # ── Fetch og:image from venue website (if no featured image yet)
-        if not venue.get("featured_media"):
+        if not args.no_images and not venue.get("featured_media"):
             website_url = (
                 meta.get("qodef_listing_single_site_url") or
                 (place_data.get("website") if place_data else None)
@@ -1157,6 +1190,10 @@ def main():
     parser.add_argument(
         "--no-places", action="store_true", dest="no_places",
         help="Skip Google Places API calls (use when monthly credit is exhausted)"
+    )
+    parser.add_argument(
+        "--no-images", action="store_true", dest="no_images",
+        help="Skip og:image scraping and featured image upload"
     )
     args = parser.parse_args()
 
