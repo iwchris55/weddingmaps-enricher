@@ -56,8 +56,6 @@ jobs:
           # Both manual and scheduled runs default to 1000 venues
           LIMIT="${{ github.event.inputs.limit }}"
           ARGS="$ARGS --limit ${LIMIT:-1000}"
-          # Places API credit exhausted for May — re-enable June 1
-          ARGS="$ARGS --no-places"
           python3 venue_enricher.py $ARGS
 
       - name: Commit progress
